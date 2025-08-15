@@ -1,0 +1,18 @@
+[project]
+name = "langgraph-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dotenv>=0.9.9",
+    "google-search-results>=2.4.2",
+    "langchain>=0.3.27",
+    "langchain-community>=0.3.27",
+    "langchain-core>=0.3.72",
+    "langchain-google-genai>=2.1.9",
+    "langchain-groq>=0.3.7",
+    "langgraph>=0.6.3",
+    "python-dotenv>=1.1.1",
+    "requests>=2.32.4",
+]
