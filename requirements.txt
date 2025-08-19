@@ -6,3 +6,4 @@ langchain_core
 langchain_community
 requests
 langchain_google_genai
+exa-py

@@ -7,7 +7,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 
 from agents import create_query_enhancer_agent, create_planner_agent, create_summarizer_agent
-from tools import serper_search_tool
+from tools import serper_search_tool, exa_crawl_urls
 from utils import init_groq, init_gemini
 
 load_dotenv()
@@ -17,6 +17,9 @@ if not os.getenv("GROQ_API_KEY"):
 
 if not os.getenv("SERPER_API_KEY"):
     print("Warning: SERPER_API_KEY not found in environment variables.")
+
+if not os.getenv("EXA_API_KEY"):
+    print("Warning: EXA_API_KEY not found in environment variables.")
 
 os.environ["LANGSMITH_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
 os.environ["LANGSMITH_TRACING"] = "true"
@@ -32,8 +35,8 @@ llm = init_groq(model="llama-3.1-8b-instant", temperature=0.7)
 gemini = init_gemini(model="gemini-2.0-flash", temperature=0.7)
 
 # create the agent instances
-query_enhancer_node = create_query_enhancer_agent(llm)
-planner_agent = create_planner_agent(serper_search_tool)
+query_enhancer_node = create_query_enhancer_agent(gemini)
+planner_agent = create_planner_agent([serper_search_tool, exa_crawl_urls], llm)
 summarizer_agent = create_summarizer_agent(gemini)
 
 def graph_builder():
@@ -91,7 +94,7 @@ if __name__ == "__main__":
     print("Testing the research agent workflow...")
     print("=" * 50)
 
-    query = "what are mcp servers?"
+    query = "A2A protocols"
     result = mygraph.invoke({"user_input": query})
     
     final_response = result.get("llm_response", "<no response>")
