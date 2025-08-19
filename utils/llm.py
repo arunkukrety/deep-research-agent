@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def init_groq(model: str = "llama-3.1-8b-instant", temperature: float = 0.7):
+def init_groq(model: str = "openai/gpt-oss-120b", temperature: float = 0.7):
     # init groq llm for fast research
     return ChatGroq(
         model=model,

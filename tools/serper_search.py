@@ -8,7 +8,11 @@ load_dotenv()
 
 @tool
 def serper_search_tool(query: str, locale: str = "us", language: str = "en") -> str:
-    # search using serper api
+    """
+    Fast Google search for quick facts, definitions, basic information, and structured data.
+    Best for: what/when/where/who questions, definitions, lists, overviews, recent news.
+    Returns: Knowledge graphs, snippets, related searches, people also ask questions.
+    """
     print(f"searching with serper: {query}")
     
     SERPER_API_KEY = os.getenv("SERPER_API_KEY")
