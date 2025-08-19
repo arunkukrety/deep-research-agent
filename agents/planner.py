@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, List, Dict
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -12,29 +12,39 @@ class GraphState(TypedDict):
     step_info: str
 
 def create_planner_agent(search_tools, llm):
-    # create react agent with search and crawl tools
-    serper_search_tool, exa_crawl_urls = search_tools
+    # Hybrid approach: LLM-driven ReAct for intelligent URL selection, but Exa crawling outside LLM
+    serper_search_tool, exa_crawl_tool = search_tools[0], search_tools[1]
+    
+    # Create ReAct agent with ONLY the lightweight search tool to avoid token bloat
     react_agent = create_react_agent(
         model=llm,
-        tools=[serper_search_tool, exa_crawl_urls],
-        state_modifier="""You are an intelligent research agent. Follow this workflow:
+        tools=[serper_search_tool],
+        state_modifier="""You are an intelligent research agent. Your task is to search for information and intelligently select the best URLs for deep content analysis.
 
-1. Search each question ONE BY ONE using serper_search_tool
+WORKFLOW:
+1. Search each research question ONE BY ONE using serper_search_tool
 2. After ALL searches are complete, analyze all the URLs you found
-3. Select 3-6 best URLs that provide comprehensive coverage
-4. Use exa_crawl_urls ONCE with your selected URLs
+3. Select 6-8 best URLs that provide comprehensive coverage
+4. Output your selected URLs in JSON format
 
 IMPORTANT RULES:
-- Call tools ONE AT A TIME, never multiple tools in parallel
+- Call serper_search_tool ONE AT A TIME for each question
 - Wait for each search to complete before moving to the next
-- Only use exa_crawl_urls ONCE at the end with your best URLs
+- Do NOT call any other tools - content crawling will be done separately
 - Be selective - choose quality sources over quantity
 
 SELECTION CRITERIA:
-- Authoritative sources (official docs, reputable sites)
+- Authoritative sources (official docs, reputable sites, academic papers)
 - Unique information (avoid duplicates)
 - Comprehensive topic coverage
-- Relevance to the original query"""
+- Relevance to the original query
+- Diverse perspectives and viewpoints
+
+OUTPUT FORMAT (at the end):
+{
+  "selected_urls": ["https://example.com/article1", "https://example.com/article2", "..."],
+  "reasoning": "Brief explanation of why these URLs were selected"
+}"""
     )
     
     def planner_agent(state: GraphState) -> GraphState:
@@ -61,7 +71,7 @@ SELECTION CRITERIA:
             
             print(f"found {len(followups)} follow-up questions")
             
-            # create research prompt for react agent
+            # Create research prompt for ReAct agent
             research_prompt = f"""
 Research these questions about "{original_query}":
 
@@ -71,46 +81,71 @@ WORKFLOW:
 1. Search question 1 with serper_search_tool
 2. Search question 2 with serper_search_tool  
 3. Continue until all questions are searched
-4. After all searches, review all URLs found
-5. Select 3-6 best URLs for comprehensive coverage
-6. Use exa_crawl_urls with your selected URLs
+4. After all searches, analyze all URLs found
+5. Select 6-8 best URLs for comprehensive coverage
+6. Output selected URLs in JSON format
 
 CRITICAL:
 - Search questions ONE BY ONE (don't try to search multiple at once)
-- Only call exa_crawl_urls ONCE at the very end
+- Do NOT call any other tools besides serper_search_tool
 - Choose URLs that complement each other, avoid duplicates
 - Prioritize authoritative sources
+- End with JSON: {{"selected_urls": ["url1", "url2", ...], "reasoning": "why these URLs"}}
 
 Start with question 1 now.
 """
             
-            # invoke react agent
+            # Invoke ReAct agent for intelligent URL selection
             messages = [HumanMessage(content=research_prompt)]
             response = react_agent.invoke({"messages": messages})
             
-            # removed duplicate logging - tools already print when they execute
-            
-            # extract final response from agent
+            # Extract final response from agent
             final_message = response["messages"][-1].content
             
-            # try to extract json from response
-            json_match = re.search(r'\[.*\]', final_message, re.DOTALL)
-            if json_match:
-                json_output = json_match.group(0)
-            else:
-                # fallback: create simple json from response
-                json_output = json.dumps([{
-                    "question": original_query,
-                    "search_result": final_message,
-                    "source": None
-                }], ensure_ascii=False, indent=2)
-            
+            # Extract URLs from LLM response
+            urls: List[str] = []
+            try:
+                # Try to extract JSON with selected URLs
+                json_match = re.search(r'\{[\s\S]*?"selected_urls"[\s\S]*?\}', final_message)
+                if json_match:
+                    parsed = json.loads(json_match.group(0))
+                    if isinstance(parsed.get("selected_urls"), list):
+                        urls = [u for u in parsed["selected_urls"] if isinstance(u, str)]
+            except Exception:
+                pass
+
+            if not urls:
+                # Fallback: extract URLs from the response text
+                urls = re.findall(r"https?://\S+", final_message)
+                urls = urls[:8]
+
+            # Fetch raw contents with Exa OUTSIDE the LLM to avoid feeding large text back to Groq
+            articles = []
+            if urls:
+                try:
+                    crawl_result_str = exa_crawl_tool.invoke({
+                        "urls": urls[:8],
+                        "max_urls": 8,
+                        "max_chars_per_article": 15000,
+                        "max_total_chars": 100000,
+                    })
+                    crawl_json = json.loads(crawl_result_str) if isinstance(crawl_result_str, str) else {}
+                    articles = crawl_json.get("articles", []) or []
+                except Exception as crawl_err:
+                    articles.append({"error": f"Exa crawl failed: {crawl_err}"})
+
+            output_payload = {
+                "query": original_query,
+                "selected_urls": urls,
+                "articles": articles,
+            }
+
             print(f"planner completed research")
-            
+
             return {
                 **state,
-                "llm_response": json_output,
-                "step_info": "Planner Agent (React with tools)",
+                "llm_response": json.dumps(output_payload, ensure_ascii=False),
+                "step_info": "Planner Agent (ReAct search + external crawl)",
             }
 
         except Exception as e:

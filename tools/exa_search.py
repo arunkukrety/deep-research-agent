@@ -1,14 +1,31 @@
 from langchain_core.tools import tool
 from exa_py import Exa
 import os
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
+import json
 
 load_dotenv()
 
+_EXA_CLIENT: Optional[Exa] = None
+
+def _get_exa_client() -> Optional[Exa]:
+    global _EXA_CLIENT
+    if _EXA_CLIENT is None:
+        api_key = os.getenv("EXA_API_KEY")
+        if not api_key:
+            return None
+        _EXA_CLIENT = Exa(api_key=api_key)
+    return _EXA_CLIENT
+
 
 @tool
-def exa_crawl_urls(urls: List[str], max_urls: int = 3) -> str:
+def exa_crawl_urls(
+    urls: List[str],
+    max_urls: int = 3,
+    max_chars_per_article: int = 6000,
+    max_total_chars: int = 20000,
+) -> str:
     """
     Crawl and extract full content from specific URLs using Exa.
     Best for: getting complete article content from known URLs.
@@ -16,36 +33,37 @@ def exa_crawl_urls(urls: List[str], max_urls: int = 3) -> str:
     """
     print(f"crawling {len(urls)} urls with exa")
     
-    EXA_API_KEY = os.getenv("EXA_API_KEY")
-    if not EXA_API_KEY:
+    client = _get_exa_client()
+    if client is None:
         return "Error: EXA_API_KEY not found in environment variables"
     
     try:
-        exa_client = Exa(api_key=EXA_API_KEY)
-        
         # limit to max_urls to avoid too many requests
         urls_to_crawl = urls[:max_urls]
         
         # get contents from specific URLs
-        result = exa_client.get_contents(
+        result = client.get_contents(
             urls=urls_to_crawl,
             text=True,
         )
         
         if not result.results:
-            return f"no content extracted from provided urls"
+            return json.dumps({"articles": []})
         
-        # format crawled content
-        formatted_result = f"Crawled Content from {len(result.results)} URLs:\n\n"
+        articles = []
+        total = 0
+        for res in result.results:
+            text = (res.text or "")[:max_chars_per_article]
+            total += len(text)
+            articles.append({
+                "title": getattr(res, "title", None),
+                "url": getattr(res, "url", None),
+                "text": text,
+            })
+            if total >= max_total_chars:
+                break
         
-        for i, res in enumerate(result.results, 1):
-            formatted_result += f"ARTICLE {i}:\n"
-            formatted_result += f"Title: {res.title}\n"
-            formatted_result += f"URL: {res.url}\n\n"
-            formatted_result += f"FULL CONTENT:\n{res.text}\n"
-            formatted_result += "=" * 80 + "\n\n"
-        
-        return formatted_result
+        return json.dumps({"articles": articles}, ensure_ascii=False)
         
     except Exception as e:
         print(f"exa crawl error: {e}")

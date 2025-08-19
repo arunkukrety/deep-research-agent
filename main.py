@@ -94,12 +94,12 @@ if __name__ == "__main__":
     print("Testing the research agent workflow...")
     print("=" * 50)
 
-    query = "A2A protocols"
+    query = "latest AI agents"
     result = mygraph.invoke({"user_input": query})
     
     final_response = result.get("llm_response", "<no response>")
     
-    # save to file instead of printing
+    # save to file
     try:
         file_path = save_output_to_markdown(final_response, query)
         print(f"\n✅ Research report saved to: {file_path}")
