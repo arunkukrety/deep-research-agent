@@ -35,7 +35,7 @@ def serper_search_tool(
         response.raise_for_status()
         data = response.json()
 
-        # Build a compact JSON result with only the essentials to minimize LLM token usage
+        # compact json for minimal tokens
         compact = {
             "query": query,
             "knowledge_graph": None,

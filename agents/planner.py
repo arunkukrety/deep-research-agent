@@ -12,10 +12,8 @@ class GraphState(TypedDict):
     step_info: str
 
 def create_planner_agent(search_tools, llm):
-    # Hybrid approach: LLM-driven ReAct for intelligent URL selection, but Exa crawling outside LLM
+    # react for url selection, exa crawling outside llm
     serper_search_tool, exa_crawl_tool = search_tools[0], search_tools[1]
-    
-    # Create ReAct agent with ONLY the lightweight search tool to avoid token bloat
     react_agent = create_react_agent(
         model=llm,
         tools=[serper_search_tool],
@@ -54,7 +52,7 @@ OUTPUT FORMAT (at the end):
             
             print(f"planner processing: {enhanced_text[:200]}...")
             
-            # extract follow-up questions from enhanced query
+            # extract follow-up questions
             followups = []
             followup_match = re.search(r"FOLLOW-UP QUESTIONS[^:]*:(.*?)(?:\n\n|CLARIFICATION QUESTIONS|$)", enhanced_text, re.DOTALL)
             if followup_match:
@@ -71,7 +69,7 @@ OUTPUT FORMAT (at the end):
             
             print(f"found {len(followups)} follow-up questions")
             
-            # Create research prompt for ReAct agent
+            # create research prompt
             research_prompt = f"""
 Research these questions about "{original_query}":
 
@@ -95,17 +93,15 @@ CRITICAL:
 Start with question 1 now.
 """
             
-            # Invoke ReAct agent for intelligent URL selection
+            # run react agent
             messages = [HumanMessage(content=research_prompt)]
             response = react_agent.invoke({"messages": messages})
             
-            # Extract final response from agent
+            # extract urls from response
             final_message = response["messages"][-1].content
-            
-            # Extract URLs from LLM response
             urls: List[str] = []
             try:
-                # Try to extract JSON with selected URLs
+                # extract json with urls
                 json_match = re.search(r'\{[\s\S]*?"selected_urls"[\s\S]*?\}', final_message)
                 if json_match:
                     parsed = json.loads(json_match.group(0))
@@ -115,11 +111,11 @@ Start with question 1 now.
                 pass
 
             if not urls:
-                # Fallback: extract URLs from the response text
+                # fallback: find urls in text
                 urls = re.findall(r"https?://\S+", final_message)
                 urls = urls[:8]
 
-            # Fetch raw contents with Exa OUTSIDE the LLM to avoid feeding large text back to Groq
+            # crawl content with exa
             articles = []
             if urls:
                 try:
@@ -145,7 +141,7 @@ Start with question 1 now.
             return {
                 **state,
                 "llm_response": json.dumps(output_payload, ensure_ascii=False),
-                "step_info": "Planner Agent (ReAct search + external crawl)",
+                "step_info": "planner agent",
             }
 
         except Exception as e:
@@ -153,7 +149,7 @@ Start with question 1 now.
             return {
                 **state,
                 "llm_response": f"Error: {e}",
-                "step_info": "Planner Agent error",
+                "step_info": "planner error",
             }
     
     return planner_agent

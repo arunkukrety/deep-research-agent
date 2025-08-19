@@ -1,140 +1,129 @@
-# LangGraph Research Agent
+# langgraph research agent
 
-A powerful research agent built with LangGraph that uses Groq's LLaMA and Google's Gemini models for comprehensive web research and report generation.
+comprehensive ai research agent with web api that generates detailed reports using multiple llms and search tools.
 
-## 🚀 Features
+## 🚀 features
 
-- **Multi-Agent Architecture**: Query enhancer → Planner → Summarizer workflow
-- **Dual LLM Support**: Groq (LLaMA 3.1) for research, Gemini for summarization
-- **Web Search Integration**: Serper API for comprehensive search results
-- **Markdown Reports**: Automatically saves research reports to `output/` folder
-- **Modular Design**: Separate agents, tools, and utilities for easy maintenance
+- **3-stage pipeline**: query enhancer → planner → summarizer
+- **dual llm setup**: groq (llama 3.1) for search planning, gemini for report writing
+- **web search**: serper api for google search results
+- **content crawling**: exa api for full article extraction
+- **fastapi endpoint**: `/research?q=query` returns markdown reports
+- **token optimization**: prevents groq context overflow
+- **detailed reports**: comprehensive analysis, not summaries
+- **auto file saving**: saves reports to `output/` folder
 
-## 📋 Prerequisites
+## 📋 requirements
 
-- Python 3.13+
-- API Keys:
-  - **GROQ_API_KEY** - Get from [Groq Console](https://console.groq.com/)
-  - **SERPER_API_KEY** - Get from [Serper.dev](https://serper.dev/)
-  - **GOOGLE_API_KEY** - Get from [Google AI Studio](https://aistudio.google.com/)
+- python 3.13+
+- api keys:
+  - **GROQ_API_KEY** - [groq console](https://console.groq.com/)
+  - **SERPER_API_KEY** - [serper.dev](https://serper.dev/)
+  - **EXA_API_KEY** - [exa.ai](https://exa.ai/)
+  - **GOOGLE_API_KEY** - [google ai studio](https://aistudio.google.com/)
 
-## 🛠️ Installation
+## 🛠️ installation
 
-### Option 1: Using UV (Recommended - Faster)
+### using uv (recommended)
 ```bash
-# Clone the repository
-git clone <your-repo-url>
+git clone <repo-url>
 cd langgraph-agent
-
-# Install dependencies with uv
 uv sync
-
-# Or add individual packages
-uv add langchain langgraph langchain-groq
 ```
 
-### Option 2: Using PIP (Traditional)
+### using pip
 ```bash
-# Clone the repository
-git clone <your-repo-url>
+git clone <repo-url>
 cd langgraph-agent
-
-# Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Option 3: Using pyproject.toml directly
+### for api usage
 ```bash
-# Modern pip supports pyproject.toml
-pip install -e .
+# add api dependencies
+uv add fastapi uvicorn
+# or with pip
+pip install fastapi uvicorn
 ```
 
-## ⚙️ Configuration
+## ⚙️ setup
 
-Create a `.env` file in the project root:
-
+create `.env` file:
 ```env
-# Required API Keys
-GROQ_API_KEY=your_groq_api_key_here
-SERPER_API_KEY=your_serper_api_key_here
-GOOGLE_API_KEY=your_google_api_key_here
-
-# Optional (for tracing)
-LANGSMITH_API_KEY=your_langsmith_key_here
+GROQ_API_KEY=your_key_here
+SERPER_API_KEY=your_key_here  
+EXA_API_KEY=your_key_here
+GOOGLE_API_KEY=your_key_here
 ```
 
-## 🚀 Usage
+## 🚀 usage
 
-### Basic Usage
-```python
-from main import mygraph
-
-# Run research on any topic
-result = mygraph.invoke({"user_input": "What are the latest AI developments?"})
-
-# Result is automatically saved to output/ folder as markdown
+### api mode (recommended)
+```bash
+python api.py
 ```
+then visit: `http://localhost:8000/research?q=your-query`
 
-### Command Line
+### command line mode
 ```bash
 python main.py
 ```
 
-## 🏗️ Project Structure
+### programmatic usage
+```python
+from main import graph_builder
+
+agent = graph_builder()
+result = agent.invoke({"user_input": "ai trends 2024"})
+print(result["llm_response"])
+```
+
+## 🏗️ structure
 
 ```
 langgraph-agent/
-├── agents/                 # Agent implementations
-│   ├── query_enhancer.py   # Enhances user queries
-│   ├── planner.py          # Research planning & execution
-│   └── summarizer.py       # Final report generation
-├── tools/                  # Search tools
-│   └── serper_search.py    # Web search functionality
-├── utils/                  # Utilities
-│   ├── llm.py             # LLM initialization
-│   └── prompts.py         # Centralized prompts
-├── output/                # Generated reports (auto-created)
-├── main.py                # Main workflow orchestration
-├── pyproject.toml         # Modern Python project config
-└── requirements.txt       # Pip compatibility
+├── agents/                 # research pipeline
+│   ├── query_enhancer.py   # improves user queries
+│   ├── planner.py          # searches + selects urls
+│   └── summarizer.py       # writes final reports
+├── tools/                  # search tools
+│   ├── serper_search.py    # google search via serper
+│   └── exa_search.py       # content crawling via exa
+├── utils/                  # shared utilities
+│   ├── llm.py             # groq + gemini clients
+│   └── prompts.py         # agent prompts
+├── output/                # saved reports
+├── main.py                # cli workflow
+├── api.py                 # fastapi web server
+├── pyproject.toml         # dependencies
+└── requirements.txt       # pip fallback
 ```
 
-## 🔧 Development
+## 🌐 api endpoints
 
-### Adding New Dependencies
+- `GET /` - health check
+- `GET /research?q=query` - generates markdown research report
+- `GET /docs` - api documentation
 
-**With UV:**
-```bash
-uv add new-package
-```
+## 🔧 how it works
 
-**With PIP:**
-```bash
-pip install new-package
-pip freeze > requirements.txt
-```
+1. **query enhancer** (gemini) - improves user query, generates research questions
+2. **planner** (groq) - searches with serper, selects best urls, crawls with exa
+3. **summarizer** (gemini) - writes comprehensive report from crawled content
 
-### Running Tests
-```bash
-python main.py
-```
+## 📊 token optimization
 
-## 🤝 Contributing
+- groq only processes lightweight search results (not full articles)
+- exa crawling happens outside llm context
+- gemini handles large content for final reports
+- prevents 413 token limit errors
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+## 🚀 deployment
 
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
+works on any python hosting platform:
+- railway, render, heroku
+- vercel, netlify functions  
+- aws lambda, google cloud run
+- local with ngrok for testing
 
 
