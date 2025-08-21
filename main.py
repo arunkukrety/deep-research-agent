@@ -1,12 +1,13 @@
 import getpass
 import os
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, List, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
+import logging
 
-from agents import create_query_enhancer_agent, create_planner_agent, create_summarizer_agent
+from agents import create_query_enhancer_agent, create_planner_agent, create_summarizer_agent, create_reddit_processor_agent
 from tools import serper_search_tool, exa_crawl_urls
 from utils import init_groq, init_gemini
 
@@ -24,33 +25,67 @@ if not os.getenv("EXA_API_KEY"):
 os.environ["LANGSMITH_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
 os.environ["LANGSMITH_TRACING"] = "true"
 
+class Article(TypedDict, total=False):
+    title: Optional[str]
+    url: str
+    text: str
+    error: Optional[str]
+
 class GraphState(TypedDict):
+    # LangGraph plumbing
     messages: Annotated[list, add_messages]
+    
+    # Inputs
     user_input: str
-    llm_response: str
+    
+    # Query enhancer outputs
+    enhanced_query: str
+    followup_questions: List[str]
+    
+    # Planner outputs
+    selected_urls: List[str]
+    articles: List[Article]
+    reddit_posts: List[str]
+    
+    # Reddit processor outputs
+    reddit_content: str
+    reddit_summary: str
+    
+    # Summarizer outputs
+    report_markdown: str
+    
+    # Meta
+    errors: List[str]
     step_info: str
 
-# init llms - groq for research, gemini for final report
-llm = init_groq(model="llama-3.1-8b-instant", temperature=0.7)
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# init llms - groq for research (lower temp for planner), gemini for final report
+llm = init_groq(model="llama-3.1-8b-instant", temperature=0.3)  # Lower temp for more consistent tool calls
 gemini = init_gemini(model="gemini-2.0-flash", temperature=0.7)
 
 # create the agent instances
 query_enhancer_node = create_query_enhancer_agent(gemini)
 planner_agent = create_planner_agent([serper_search_tool, exa_crawl_urls], llm)
+reddit_processor_agent = create_reddit_processor_agent(llm)
 summarizer_agent = create_summarizer_agent(gemini)
 
 def graph_builder():
     graph = StateGraph(GraphState)
     
-    # add nodes: query enhancer -> planner -> summarizer
+    # add nodes: query enhancer -> planner -> reddit processor -> summarizer
     graph.add_node("query enhancer", query_enhancer_node)
     graph.add_node("planner", planner_agent)
+    graph.add_node("reddit processor", reddit_processor_agent)
     graph.add_node("summarizer", summarizer_agent)
 
     # connect the flow
     graph.add_edge(START, "query enhancer")
     graph.add_edge("query enhancer", "planner")
-    graph.add_edge("planner", "summarizer")
+    graph.add_edge("planner", "reddit processor")
+    graph.add_edge("reddit processor", "summarizer")
     graph.add_edge("summarizer", END)
 
     return graph.compile()
@@ -91,22 +126,51 @@ mygraph = graph_builder()
 
 # test run
 if __name__ == "__main__":
-    print("Testing the research agent workflow...")
+    logger.info("Testing the research agent workflow...")
     print("=" * 50)
 
     query = "latest AI agents"
-    result = mygraph.invoke({"user_input": query})
     
-    final_response = result.get("llm_response", "<no response>")
+    # Initialize state with defaults
+    initial_state = {
+        "user_input": query,
+        "enhanced_query": "",
+        "followup_questions": [],
+        "selected_urls": [],
+        "articles": [],
+        "reddit_posts": [],
+        "reddit_content": "",
+        "reddit_summary": "",
+        "report_markdown": "",
+        "errors": [],
+        "messages": [],
+        "step_info": "",
+    }
+    
+    result = mygraph.invoke(initial_state)
+    
+    final_response = result.get("report_markdown", "<no report generated>")
     
     # save to file
     try:
         file_path = save_output_to_markdown(final_response, query)
         print(f"\n✅ Research report saved to: {file_path}")
+        logger.info(f"Report saved to: {file_path}")
     except Exception as e:
+        logger.error(f"Error saving file: {e}")
         print(f"\n❌ Error saving file: {e}")
         print("\n=== Final Report (Console Output) ===\n")
         print(final_response)
     
     print("\n" + "=" * 50)
-    print(f"Final step: {result.get('step_info', 'Unknown')}")
+    logger.info(f"Workflow completed. Final step: {result.get('step_info', 'Unknown')}")
+    
+    # Log any errors that occurred
+    errors = result.get("errors", [])
+    if errors:
+        logger.warning(f"Errors encountered during workflow: {errors}")
+    
+    # Log summary stats
+    selected_urls = result.get("selected_urls", [])
+    articles = result.get("articles", [])
+    logger.info(f"Workflow summary: {len(selected_urls)} URLs selected, {len(articles)} articles processed")

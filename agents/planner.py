@@ -1,14 +1,99 @@
-from typing import TypedDict, Annotated, List, Dict
+from typing import TypedDict, Annotated, List, Dict, Optional
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import SystemMessage, HumanMessage
 import re
 import json
+import logging
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from collections import defaultdict
+from utils.prompts import PLANNER_PROMPT
+
+logger = logging.getLogger(__name__)
+
+def normalize_url(url: str) -> str:
+    """Normalize URL by removing tracking parameters and fragments."""
+    try:
+        parsed = urlparse(url)
+        # Remove common tracking parameters
+        tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 
+                          'fbclid', 'gclid', 'ref', 'source', 'campaign_id'}
+        query_params = parse_qs(parsed.query)
+        filtered_params = {k: v for k, v in query_params.items() if k not in tracking_params}
+        clean_query = urlencode(filtered_params, doseq=True)
+        
+        # Remove fragment and rebuild URL
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, clean_query, ''))
+    except Exception:
+        return url
+
+def deduplicate_and_diversify_urls(urls: List[str], max_urls: int = 8, max_per_domain: int = 2) -> List[str]:
+    """Deduplicate URLs and enforce domain diversity."""
+    if not urls:
+        return []
+    
+    # Normalize and deduplicate
+    normalized = {}
+    for url in urls:
+        if not url or not url.startswith(('http://', 'https://')):
+            continue
+        norm_url = normalize_url(url)
+        if norm_url not in normalized:
+            normalized[norm_url] = url
+    
+    # Group by domain
+    domain_groups = defaultdict(list)
+    for norm_url, orig_url in normalized.items():
+        try:
+            domain = urlparse(norm_url).netloc.lower()
+            # Remove 'www.' prefix for grouping
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            domain_groups[domain].append(orig_url)
+        except Exception:
+            continue
+    
+    # Select URLs with domain diversity
+    selected = []
+    for domain, domain_urls in domain_groups.items():
+        # Take up to max_per_domain from each domain
+        selected.extend(domain_urls[:max_per_domain])
+        if len(selected) >= max_urls:
+            break
+    
+    return selected[:max_urls]
+
+class Article(TypedDict, total=False):
+    title: Optional[str]
+    url: str
+    text: str
+    error: Optional[str]
 
 class GraphState(TypedDict):
+    # LangGraph plumbing
     messages: Annotated[list, add_messages]
+    
+    # Inputs
     user_input: str
-    llm_response: str
+    
+    # Query enhancer outputs
+    enhanced_query: str
+    followup_questions: List[str]
+    
+    # Planner outputs
+    selected_urls: List[str]
+    articles: List[Article]
+    reddit_posts: List[str]
+    
+    # Reddit processor outputs
+    reddit_content: str
+    reddit_summary: str
+    
+    # Summarizer outputs
+    report_markdown: str
+    
+    # Meta
+    errors: List[str]
     step_info: str
 
 def create_planner_agent(search_tools, llm):
@@ -17,78 +102,47 @@ def create_planner_agent(search_tools, llm):
     react_agent = create_react_agent(
         model=llm,
         tools=[serper_search_tool],
-        state_modifier="""You are an intelligent research agent. Your task is to search for information and intelligently select the best URLs for deep content analysis.
-
-WORKFLOW:
-1. Search each research question ONE BY ONE using serper_search_tool
-2. After ALL searches are complete, analyze all the URLs you found
-3. Select 6-8 best URLs that provide comprehensive coverage
-4. Output your selected URLs in JSON format
-
-IMPORTANT RULES:
-- Call serper_search_tool ONE AT A TIME for each question
-- Wait for each search to complete before moving to the next
-- Do NOT call any other tools - content crawling will be done separately
-- Be selective - choose quality sources over quantity
-
-SELECTION CRITERIA:
-- Authoritative sources (official docs, reputable sites, academic papers)
-- Unique information (avoid duplicates)
-- Comprehensive topic coverage
-- Relevance to the original query
-- Diverse perspectives and viewpoints
-
-OUTPUT FORMAT (at the end):
-{
-  "selected_urls": ["https://example.com/article1", "https://example.com/article2", "..."],
-  "reasoning": "Brief explanation of why these URLs were selected"
-}"""
+        state_modifier=PLANNER_PROMPT
     )
     
     def planner_agent(state: GraphState) -> GraphState:
         try:
-            enhanced_text = state["llm_response"]
+            followup_questions = state.get("followup_questions", [])
             original_query = state.get("user_input", "")
+            enhanced_query = state.get("enhanced_query", original_query)
             
-            print(f"planner processing: {enhanced_text[:200]}...")
+            logger.info(f"Planner processing {len(followup_questions)} follow-up questions for: {original_query[:100]}...")
             
-            # extract follow-up questions
-            followups = []
-            followup_match = re.search(r"FOLLOW-UP QUESTIONS[^:]*:(.*?)(?:\n\n|CLARIFICATION QUESTIONS|$)", enhanced_text, re.DOTALL)
-            if followup_match:
-                block = followup_match.group(1)
-                for line in block.splitlines():
-                    line = line.strip()
-                    if re.match(r"^\d+\.", line):
-                        question = re.sub(r"^\d+\.\s*", "", line).strip()
-                        if question:
-                            followups.append(question)
+            # Ensure we have questions to search
+            if not followup_questions:
+                followup_questions = [enhanced_query or original_query]
+                logger.warning("No follow-up questions found, using enhanced/original query")
             
-            if not followups:
-                followups = [original_query or enhanced_text[:200]]
-            
-            print(f"found {len(followups)} follow-up questions")
+            logger.info(f"Searching {len(followup_questions)} questions")
             
             # create research prompt
             research_prompt = f"""
 Research these questions about "{original_query}":
 
-{chr(10).join(f"{i+1}. {q}" for i, q in enumerate(followups[:6]))}
+{chr(10).join(f"{i+1}. {q}" for i, q in enumerate(followup_questions[:6]))}
 
 WORKFLOW:
 1. Search question 1 with serper_search_tool
 2. Search question 2 with serper_search_tool  
 3. Continue until all questions are searched
-4. After all searches, analyze all URLs found
-5. Select 6-8 best URLs for comprehensive coverage
-6. Output selected URLs in JSON format
+4. Search for Reddit discussions by adding 'site:reddit.com' to 2-3 key questions
+5. After all searches, analyze all URLs found
+6. Select 6-8 best URLs for comprehensive coverage
+7. Extract Reddit URLs separately for Reddit scraping
+8. Output selected URLs in JSON format
 
 CRITICAL:
 - Search questions ONE BY ONE (don't try to search multiple at once)
-- Do NOT call any other tools besides serper_search_tool
+- For Reddit searches: add 'site:reddit.com' to your query (e.g., "AI agents site:reddit.com")
+- Look for URLs starting with 'https://www.reddit.com/r/' or 'https://reddit.com/r/'
 - Choose URLs that complement each other, avoid duplicates
 - Prioritize authoritative sources
-- End with JSON: {{"selected_urls": ["url1", "url2", ...], "reasoning": "why these URLs"}}
+- End with JSON: {{"selected_urls": ["url1", "url2", ...], "reddit_urls": ["reddit_url1", "reddit_url2", ...], "reasoning": "why these URLs"}}
 
 Start with question 1 now.
 """
@@ -99,57 +153,102 @@ Start with question 1 now.
             
             # extract urls from response
             final_message = response["messages"][-1].content
-            urls: List[str] = []
+            raw_urls: List[str] = []
+            reddit_urls: List[str] = []
+            
             try:
                 # extract json with urls
                 json_match = re.search(r'\{[\s\S]*?"selected_urls"[\s\S]*?\}', final_message)
                 if json_match:
                     parsed = json.loads(json_match.group(0))
                     if isinstance(parsed.get("selected_urls"), list):
-                        urls = [u for u in parsed["selected_urls"] if isinstance(u, str)]
-            except Exception:
-                pass
+                        raw_urls = [u for u in parsed["selected_urls"] if isinstance(u, str) and u.startswith(('http://', 'https://'))]
+                    if isinstance(parsed.get("reddit_urls"), list):
+                        reddit_urls = [u for u in parsed["reddit_urls"] if isinstance(u, str) and u.startswith(('https://www.reddit.com/', 'https://reddit.com/'))]
+            except Exception as e:
+                logger.warning(f"Failed to parse URLs from JSON: {e}")
 
-            if not urls:
+            if not raw_urls:
                 # fallback: find urls in text
-                urls = re.findall(r"https?://\S+", final_message)
-                urls = urls[:8]
+                raw_urls = re.findall(r"https?://\S+", final_message)
+                logger.info(f"Fallback: extracted {len(raw_urls)} URLs from text")
+            
+            # Extract Reddit URLs from all found URLs if not already extracted
+            if not reddit_urls:
+                reddit_pattern = r'https?://(?:www\.)?reddit\.com/r/[^/\s]+/comments/[^/\s]+/[^/\s]+/?'
+                reddit_urls = re.findall(reddit_pattern, final_message)
+                # Also check in raw_urls for Reddit URLs
+                for url in raw_urls:
+                    if re.match(reddit_pattern, url):
+                        reddit_urls.append(url)
+                        raw_urls.remove(url)  # Remove from regular URLs
+
+            # Post-process URLs: deduplicate and enforce domain diversity
+            selected_urls = deduplicate_and_diversify_urls(raw_urls, max_urls=8, max_per_domain=2)
+            logger.info(f"Selected {len(selected_urls)} URLs after deduplication and diversity filtering")
 
             # crawl content with exa
-            articles = []
-            if urls:
+            articles: List[Article] = []
+            if selected_urls:
                 try:
                     crawl_result_str = exa_crawl_tool.invoke({
-                        "urls": urls[:8],
-                        "max_urls": 8,
+                        "urls": selected_urls,
+                        "max_urls": len(selected_urls),
                         "max_chars_per_article": 15000,
                         "max_total_chars": 100000,
                     })
-                    crawl_json = json.loads(crawl_result_str) if isinstance(crawl_result_str, str) else {}
-                    articles = crawl_json.get("articles", []) or []
+                    
+                    if isinstance(crawl_result_str, str):
+                        crawl_json = json.loads(crawl_result_str)
+                        raw_articles = crawl_json.get("articles", [])
+                        
+                        # Process articles and handle errors
+                        for article in raw_articles:
+                            if isinstance(article, dict):
+                                processed_article: Article = {
+                                    "title": article.get("title") or "Untitled",
+                                    "url": article.get("url", ""),
+                                    "text": article.get("text", "").strip(),
+                                }
+                                
+                                # Skip articles with no meaningful content
+                                if processed_article["text"] and len(processed_article["text"]) > 50:
+                                    articles.append(processed_article)
+                                else:
+                                    processed_article["error"] = "No meaningful content extracted"
+                                    articles.append(processed_article)
+                        
+                        logger.info(f"Successfully crawled {len([a for a in articles if not a.get('error')])} articles")
+                        
                 except Exception as crawl_err:
-                    articles.append({"error": f"Exa crawl failed: {crawl_err}"})
+                    logger.error(f"Exa crawl failed: {crawl_err}")
+                    articles.append({
+                        "title": "Crawl Error",
+                        "url": "",
+                        "text": "",
+                        "error": f"Exa crawl failed: {crawl_err}"
+                    })
+            else:
+                logger.warning("No URLs to crawl")
 
-            output_payload = {
-                "query": original_query,
-                "selected_urls": urls,
-                "articles": articles,
-            }
-
-            print(f"planner completed research")
+            logger.info(f"Planner completed research with {len(selected_urls)} URLs, {len(articles)} articles, and {len(reddit_urls)} Reddit URLs")
 
             return {
                 **state,
-                "llm_response": json.dumps(output_payload, ensure_ascii=False),
-                "step_info": "planner agent",
+                "selected_urls": selected_urls,
+                "articles": articles,
+                "reddit_posts": reddit_urls,  # Pass Reddit URLs to next step
+                "step_info": "Planner",
             }
 
         except Exception as e:
-            print(f"planner error: {e}")
+            logger.error(f"Planner error: {e}")
             return {
                 **state,
-                "llm_response": f"Error: {e}",
-                "step_info": "planner error",
+                "selected_urls": [],
+                "articles": [],
+                "errors": state.get("errors", []) + [f"Planner error: {e}"],
+                "step_info": "Planner (error)",
             }
     
     return planner_agent

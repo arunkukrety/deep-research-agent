@@ -143,9 +143,17 @@ WRITING STYLE:
 - Use transitional sentences to connect complex ideas
 - Include specific quotes, data points, and examples
 - Maintain academic/professional depth while being accessible
-- Use inline citations [n] extensively throughout
+- Use CLICKABLE inline citations [1](url), [2](url), etc. - NOT plain [1], [2]
+- Limit citations to 1-3 per paragraph, only for important claims or data
 - NO bullet points, NO short summaries, NO brief overviews
 - Expand on every point with context, implications, and analysis
+
+CITATION RULES:
+- Use clickable markdown links: [1](https://example.com) instead of plain [1]
+- Only cite sources for important claims, specific data, or direct quotes
+- 1-3 citations per paragraph maximum
+- Don't over-cite general information
+- Focus on citing authoritative sources for key facts and figures
 
 Remember: This should read like a comprehensive research paper or detailed white paper, not a brief web article summary. Use ALL available information from the crawled articles to create an exhaustive, authoritative report.
 """

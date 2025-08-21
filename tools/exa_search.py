@@ -4,8 +4,10 @@ import os
 from typing import List, Optional
 from dotenv import load_dotenv
 import json
+import logging
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 _EXA_CLIENT: Optional[Exa] = None
 
@@ -31,7 +33,7 @@ def exa_crawl_urls(
     Best for: getting complete article content from known URLs.
     Takes a list of URLs and returns full text content from each.
     """
-    print(f"crawling {len(urls)} urls with exa")
+    logger.info(f"Crawling {len(urls)} URLs with Exa")
     
     client = _get_exa_client()
     if client is None:
@@ -66,5 +68,5 @@ def exa_crawl_urls(
         return json.dumps({"articles": articles}, ensure_ascii=False)
         
     except Exception as e:
-        print(f"exa crawl error: {e}")
+        logger.error(f"Exa crawl error: {e}")
         return f"Error crawling URLs with Exa: {str(e)}"
