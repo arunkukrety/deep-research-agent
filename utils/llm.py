@@ -16,7 +16,7 @@ def init_groq(model: str = "openai/gpt-oss-120b", temperature: float = 0.7):
         max_retries=2,
     )
 
-def init_gemini(model: str = "gemini-2.0-flash", temperature: float = 0.7):
+def init_gemini(model: str = "gemini-2.5-flash", temperature: float = 0.7):
     # init gemini for final report writing
     return ChatGoogleGenerativeAI(
         model=model,

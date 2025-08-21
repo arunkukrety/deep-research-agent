@@ -2,9 +2,11 @@ from langchain_core.tools import tool
 import requests
 import os
 import json
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 @tool
@@ -19,7 +21,7 @@ def serper_search_tool(
     Best for: what/when/where/who questions, definitions, lists, overviews, recent news.
     Returns: Knowledge graphs, snippets, related searches, people also ask questions.
     """
-    print(f"searching with serper: {query}")
+    logger.info(f"Searching with Serper: {query}")
     
     SERPER_API_KEY = os.getenv("SERPER_API_KEY")
     if not SERPER_API_KEY:
@@ -60,5 +62,5 @@ def serper_search_tool(
         return json.dumps(compact, ensure_ascii=False)
 
     except Exception as e:
-        print(f"error occurred: {str(e)}")
+        logger.error(f"Serper search error: {str(e)}")
         return json.dumps({"error": f"Error fetching search results: {str(e)}"})

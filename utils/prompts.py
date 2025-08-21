@@ -24,17 +24,70 @@ For different query types, consider these research angles (adapt intelligently, 
 
 Generate 4-7 focused research questions that will help gather comprehensive information about the topic.
 
-Output format (strict):
-ENHANCED QUERY: <rewrite the user's query with neutral research framing; preserve original phrase in quotes>
+Output format (STRICT JSON ONLY):
+{
+  "enhanced_query": "<rewrite the user's query with neutral research framing; preserve original phrase in quotes>",
+  "followup_questions": [
+    "<specific searchable question about the topic>",
+    "<specific searchable question about the topic>",
+    "<specific searchable question about the topic>"
+  ],
+  "clarification_questions": [
+    "<clarification needed if query is genuinely ambiguous>"
+  ]
+}
 
-FOLLOW-UP QUESTIONS (research angles to investigate about the topic):
-1. <specific searchable question about the topic>
-2. <specific searchable question about the topic>
-3. <specific searchable question about the topic>
-...
+CRITICAL: Respond ONLY with valid JSON. No other text before or after.
+"""
 
-CLARIFICATION QUESTIONS (include ONLY if the original query is genuinely ambiguous):
-1. <clarification needed>
+PLANNER_PROMPT = """
+You are an intelligent research agent. Your task is to search for information and intelligently select the best URLs for deep content analysis.
+
+WORKFLOW:
+1. Search each research question ONE BY ONE using serper_search_tool
+2. Search for Reddit discussions by adding 'site:reddit.com' to 2-3 key questions
+3. After ALL searches are complete, analyze all the URLs you found
+4. Select 6-8 best URLs that provide comprehensive coverage
+5. Extract Reddit URLs separately for Reddit scraping
+6. Output your selected URLs in JSON format
+
+IMPORTANT RULES:
+- Call serper_search_tool ONE AT A TIME for each question
+- For Reddit searches: add 'site:reddit.com' to your query (e.g., "AI agents site:reddit.com")
+- Look for URLs starting with 'https://www.reddit.com/r/' or 'https://reddit.com/r/'
+- Wait for each search to complete before moving to the next
+- Do NOT call any other tools - content crawling will be done separately
+- Be selective - choose quality sources over quantity
+
+SELECTION CRITERIA:
+- Authoritative sources (official docs, reputable sites, academic papers)
+- Unique information (avoid duplicates)
+- Comprehensive topic coverage
+- Relevance to the original query
+- Diverse perspectives and viewpoints
+
+OUTPUT FORMAT (at the end):
+{
+  "selected_urls": ["https://example.com/article1", "https://example.com/article2", "..."],
+  "reddit_urls": ["https://www.reddit.com/r/subreddit/comments/...", "..."],
+  "reasoning": "Brief explanation of why these URLs were selected"
+}
+"""
+
+REDDIT_PROCESSOR_PROMPT = """
+Analyze the following Reddit discussions about "{query}" and provide a comprehensive summary.
+
+REDDIT CONTENT:
+{reddit_content}
+
+Please provide a summary that includes:
+1. Key themes and discussions found
+2. Popular opinions and viewpoints
+3. Notable comments or insights
+4. Overall sentiment of the Reddit community
+5. Any controversial or trending topics
+
+Format your response as a clear, structured summary.
 """
 
 SUMMARIZER_PROMPT = """
