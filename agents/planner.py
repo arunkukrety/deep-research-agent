@@ -84,10 +84,12 @@ class GraphState(TypedDict):
     selected_urls: List[str]
     articles: List[Article]
     reddit_posts: List[str]
+    youtube_urls: List[str]
+    platform_questions: List[str]
     
-    # Reddit processor outputs
-    reddit_content: str
-    reddit_summary: str
+    # Scraper agent outputs
+    platform_content: str
+    platform_summary: str
     
     # Summarizer outputs
     report_markdown: str
@@ -131,18 +133,21 @@ WORKFLOW:
 2. Search question 2 with serper_search_tool  
 3. Continue until all questions are searched
 4. Search for Reddit discussions by adding 'site:reddit.com' to 2-3 key questions
-5. After all searches, analyze all URLs found
-6. Select 6-8 best URLs for comprehensive coverage
-7. Extract Reddit URLs separately for Reddit scraping
-8. Output selected URLs in JSON format
+5. Search for YouTube videos by adding 'site:youtube.com' to 2-3 key questions
+6. After all searches, analyze all URLs found
+7. Select 6-8 best URLs for comprehensive coverage
+8. Extract Reddit and YouTube URLs separately for platform scraping
+9. Output selected URLs in JSON format
 
 CRITICAL:
 - Search questions ONE BY ONE (don't try to search multiple at once)
 - For Reddit searches: add 'site:reddit.com' to your query (e.g., "AI agents site:reddit.com")
+- For YouTube searches: add 'site:youtube.com' to your query (e.g., "AI agents tutorial site:youtube.com")
 - Look for URLs starting with 'https://www.reddit.com/r/' or 'https://reddit.com/r/'
+- Look for URLs starting with 'https://www.youtube.com/watch' or 'https://youtu.be/'
 - Choose URLs that complement each other, avoid duplicates
 - Prioritize authoritative sources
-- End with JSON: {{"selected_urls": ["url1", "url2", ...], "reddit_urls": ["reddit_url1", "reddit_url2", ...], "reasoning": "why these URLs"}}
+- End with JSON: {{"selected_urls": ["url1", "url2", ...], "reddit_urls": ["reddit_url1", "reddit_url2", ...], "youtube_urls": ["youtube_url1", "youtube_url2", ...], "reasoning": "why these URLs"}}
 
 Start with question 1 now.
 """
@@ -165,6 +170,8 @@ Start with question 1 now.
                         raw_urls = [u for u in parsed["selected_urls"] if isinstance(u, str) and u.startswith(('http://', 'https://'))]
                     if isinstance(parsed.get("reddit_urls"), list):
                         reddit_urls = [u for u in parsed["reddit_urls"] if isinstance(u, str) and u.startswith(('https://www.reddit.com/', 'https://reddit.com/'))]
+                    if isinstance(parsed.get("youtube_urls"), list):
+                        youtube_urls = [u for u in parsed["youtube_urls"] if isinstance(u, str) and u.startswith(('https://www.youtube.com/watch', 'https://youtu.be/'))]
             except Exception as e:
                 logger.warning(f"Failed to parse URLs from JSON: {e}")
 
@@ -173,7 +180,8 @@ Start with question 1 now.
                 raw_urls = re.findall(r"https?://\S+", final_message)
                 logger.info(f"Fallback: extracted {len(raw_urls)} URLs from text")
             
-            # Extract Reddit URLs from all found URLs if not already extracted
+            # Extract platform URLs from all found URLs
+            youtube_urls = []
             if not reddit_urls:
                 reddit_pattern = r'https?://(?:www\.)?reddit\.com/r/[^/\s]+/comments/[^/\s]+/[^/\s]+/?'
                 reddit_urls = re.findall(reddit_pattern, final_message)
@@ -182,6 +190,15 @@ Start with question 1 now.
                     if re.match(reddit_pattern, url):
                         reddit_urls.append(url)
                         raw_urls.remove(url)  # Remove from regular URLs
+            
+            # Extract YouTube URLs
+            youtube_pattern = r'https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/)[^&\s]+'
+            youtube_urls = re.findall(youtube_pattern, final_message)
+            # Also check in raw_urls for YouTube URLs
+            for url in raw_urls:
+                if re.match(youtube_pattern, url):
+                    youtube_urls.append(url)
+                    raw_urls.remove(url)  # Remove from regular URLs
 
             # Post-process URLs: deduplicate and enforce domain diversity
             selected_urls = deduplicate_and_diversify_urls(raw_urls, max_urls=8, max_per_domain=2)
@@ -231,13 +248,18 @@ Start with question 1 now.
             else:
                 logger.warning("No URLs to crawl")
 
-            logger.info(f"Planner completed research with {len(selected_urls)} URLs, {len(articles)} articles, and {len(reddit_urls)} Reddit URLs")
+            # Prepare platform questions for scraper agent
+            platform_questions = followup_questions[:3]  # Use first 3 questions for platform search
+            
+            logger.info(f"Planner completed research with {len(selected_urls)} URLs, {len(articles)} articles, {len(reddit_urls)} Reddit URLs, and {len(youtube_urls)} YouTube URLs")
 
             return {
                 **state,
                 "selected_urls": selected_urls,
                 "articles": articles,
                 "reddit_posts": reddit_urls,  # Pass Reddit URLs to next step
+                "youtube_urls": youtube_urls,  # Pass YouTube URLs to next step
+                "platform_questions": platform_questions,  # Pass questions for platform search
                 "step_info": "Planner",
             }
 

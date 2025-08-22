@@ -29,10 +29,13 @@ class GraphState(TypedDict):
     selected_urls: List[str]
     articles: List[Article]
     reddit_posts: List[str]
+    youtube_urls: List[str]
+    platform_questions: List[str]
     
-    # Reddit processor outputs
-    reddit_content: str
-    reddit_summary: str
+    # Scraper agent outputs
+    platform_content: str
+    platform_summary: str
+    platform_urls: dict
     
     # Summarizer outputs
     report_markdown: str
@@ -47,8 +50,9 @@ def create_summarizer_agent(gemini: ChatGoogleGenerativeAI):
             articles = state.get("articles", [])
             original_query = state.get("user_input", "")
             selected_urls = state.get("selected_urls", [])
-            reddit_content = state.get("reddit_content", "")
-            reddit_summary = state.get("reddit_summary", "")
+            platform_content = state.get("platform_content", "")
+            platform_summary = state.get("platform_summary", "")
+            platform_urls = state.get("platform_urls", {})
             
             logger.info(f"Summarizer processing {len(articles)} articles for: {original_query[:100]}...")
             
@@ -79,6 +83,16 @@ def create_summarizer_agent(gemini: ChatGoogleGenerativeAI):
                 else:
                     sources.append(f"{i+1}. {title} - No URL available")
             
+            # Add platform URLs to sources
+            reddit_urls = platform_urls.get("reddit_urls", [])
+            youtube_urls = platform_urls.get("youtube_urls", [])
+            
+            for i, url in enumerate(reddit_urls):
+                sources.append(f"{len(sources)+1}. Reddit Discussion - {url}")
+            
+            for i, url in enumerate(youtube_urls):
+                sources.append(f"{len(sources)+1}. YouTube Video - {url}")
+            
             # Prepare content for the model with article references
             articles_content = []
             for i, article in enumerate(valid_articles):
@@ -102,12 +116,14 @@ def create_summarizer_agent(gemini: ChatGoogleGenerativeAI):
                 
                 content_for_model = "\n\n".join(articles_content)
 
-            # Prepare content including Reddit discussions
+            # Prepare content including platform discussions
             all_content = content_for_model
             
-            if reddit_content and reddit_summary:
-                all_content += f"\n\nREDDIT DISCUSSIONS:\n{reddit_content[:10000]}\n\nREDDIT SUMMARY:\n{reddit_summary}"
-                logger.info("Including Reddit content in final report")
+            if platform_content:
+                # Limit platform content to avoid token limits - use first 8000 chars
+                limited_platform_content = platform_content[:8000]
+                all_content += f"\n\nPLATFORM CONTENT (Reddit & YouTube):\n{limited_platform_content}"
+                logger.info(f"Including limited platform content in final report ({len(limited_platform_content)} chars)")
             
             messages = [
                 SystemMessage(content=SUMMARIZER_PROMPT),
@@ -121,7 +137,7 @@ SOURCES FOR CLICKABLE CITATIONS:
 
 IMPORTANT: Create clickable citations using markdown format [1](url), [2](url), etc. that correspond to the sources above. Only cite important claims, specific data, or direct quotes - limit to 1-3 citations per paragraph.
 
-Create a comprehensive markdown report with proper clickable citations. If Reddit discussions are included, mention community perspectives and insights from Reddit users.""")
+Create a comprehensive markdown report with proper clickable citations. If platform content is included, analyze the raw Reddit discussions and YouTube transcripts to extract community perspectives and insights.""")
             ]
             
             response = gemini.invoke(messages)
