@@ -9,3 +9,4 @@ langchain_google_genai
 exa-py
 uvicorn
 fastapi
+youtube-transcript-api==0.6.3

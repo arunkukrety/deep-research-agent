@@ -7,7 +7,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 import logging
 
-from agents import create_query_enhancer_agent, create_planner_agent, create_summarizer_agent, create_reddit_processor_agent
+from agents import create_query_enhancer_agent, create_planner_agent, create_summarizer_agent, create_scraper_agent
 from tools import serper_search_tool, exa_crawl_urls
 from utils import init_groq, init_gemini
 
@@ -46,10 +46,13 @@ class GraphState(TypedDict):
     selected_urls: List[str]
     articles: List[Article]
     reddit_posts: List[str]
+    youtube_urls: List[str]
+    platform_questions: List[str]
     
-    # Reddit processor outputs
-    reddit_content: str
-    reddit_summary: str
+    # Scraper agent outputs
+    platform_content: str
+    platform_summary: str
+    platform_urls: dict
     
     # Summarizer outputs
     report_markdown: str
@@ -69,23 +72,23 @@ gemini = init_gemini(model="gemini-2.0-flash", temperature=0.7)
 # create the agent instances
 query_enhancer_node = create_query_enhancer_agent(gemini)
 planner_agent = create_planner_agent([serper_search_tool, exa_crawl_urls], llm)
-reddit_processor_agent = create_reddit_processor_agent(llm)
+scraper_agent = create_scraper_agent(llm)
 summarizer_agent = create_summarizer_agent(gemini)
 
 def graph_builder():
     graph = StateGraph(GraphState)
     
-    # add nodes: query enhancer -> planner -> reddit processor -> summarizer
+    # add nodes: query enhancer -> planner -> scraper agent -> summarizer
     graph.add_node("query enhancer", query_enhancer_node)
     graph.add_node("planner", planner_agent)
-    graph.add_node("reddit processor", reddit_processor_agent)
+    graph.add_node("scraper agent", scraper_agent)
     graph.add_node("summarizer", summarizer_agent)
 
     # connect the flow
     graph.add_edge(START, "query enhancer")
     graph.add_edge("query enhancer", "planner")
-    graph.add_edge("planner", "reddit processor")
-    graph.add_edge("reddit processor", "summarizer")
+    graph.add_edge("planner", "scraper agent")
+    graph.add_edge("scraper agent", "summarizer")
     graph.add_edge("summarizer", END)
 
     return graph.compile()
@@ -129,7 +132,7 @@ if __name__ == "__main__":
     logger.info("Testing the research agent workflow...")
     print("=" * 50)
 
-    query = "latest AI agents"
+    query = "MCP servers in ai agents"
     
     # Initialize state with defaults
     initial_state = {
