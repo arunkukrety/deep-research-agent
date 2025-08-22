@@ -43,29 +43,37 @@ def get_reddit_comments(url: str) -> str:
         post_subreddit = post_data.get("subreddit", "unknown")
         post_comments_count = post_data.get("num_comments", 0)
 
-        # Extract comments
+        # Extract top comments only (limit to top 5 by score)
         comments = []
         if len(data) > 1 and "children" in data[1]["data"]:
+            # Get all comments and sort by score
+            all_comments = []
             for comment in data[1]["data"]["children"]:
                 if "body" in comment.get("data", {}):
                     author = comment["data"].get("author", "Anonymous")
                     score = comment["data"].get("score", 0)
                     body = comment["data"]["body"]
-                    comments.append(f"Author: {author} | Score: {score}\n{body}")
+                    all_comments.append((score, author, body))
+            
+            # Sort by score (highest first) and take top 5
+            all_comments.sort(key=lambda x: x[0], reverse=True)
+            top_comments = all_comments[:5]
+            
+            for score, author, body in top_comments:
+                comments.append(f"Author: {author} | Score: {score}\n{body}")
 
-        # Format the output
+        # Format the output (optimized)
         formatted_output = f"""REDDIT POST: {post_title}
+Post Link: {url}
 Subreddit: r/{post_subreddit}
-Author: u/{post_author}
 Score: {post_score}
-Comments: {post_comments_count}
 
 Content: {post_content}
 
 """
         
         if comments:
-            formatted_output += "COMMENTS:\n\n"
+            formatted_output += "TOP COMMENTS:\n\n"
             formatted_output += "\n\n---\n\n".join(comments)
         else:
             formatted_output += "No comments found."
